@@ -750,11 +750,15 @@ def handler(job):
 
         print(f"worker-comfyui - Processing {len(outputs)} output nodes...")
         for node_id, node_output in outputs.items():
-            if "images" in node_output:
+            # Collect both image and audio outputs (SaveAudio/SaveAudioMP3 report under "audio")
+            media_infos = list(node_output.get("images", [])) + list(
+                node_output.get("audio", [])
+            )
+            if media_infos:
                 print(
-                    f"worker-comfyui - Node {node_id} contains {len(node_output['images'])} image(s)"
+                    f"worker-comfyui - Node {node_id} contains {len(media_infos)} media file(s)"
                 )
-                for image_info in node_output["images"]:
+                for image_info in media_infos:
                     filename = image_info.get("filename")
                     subfolder = image_info.get("subfolder", "")
                     img_type = image_info.get("type")
