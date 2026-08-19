@@ -569,6 +569,44 @@ def get_image_data(filename, subfolder, image_type):
         return None
 
 
+def _upload_to_bucket(job_id, filename, file_path):
+    """Upload a file to the configured S3-compatible bucket with a deterministic key.
+
+    Key layout: music-studio/{job_id}/{filename}
+    Required env: BUCKET_ENDPOINT_URL, BUCKET_ACCESS_KEY_ID,
+    BUCKET_SECRET_ACCESS_KEY, BUCKET_NAME
+    """
+    import boto3
+
+    content_types = {
+        ".mp3": "audio/mpeg",
+        ".flac": "audio/flac",
+        ".wav": "audio/wav",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".webp": "image/webp",
+    }
+    ext = os.path.splitext(filename)[1].lower()
+    client = boto3.client(
+        "s3",
+        endpoint_url=os.environ["BUCKET_ENDPOINT_URL"],
+        aws_access_key_id=os.environ["BUCKET_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["BUCKET_SECRET_ACCESS_KEY"],
+        region_name=os.environ.get("BUCKET_REGION", "auto"),
+    )
+    key = f"music-studio/{job_id}/{filename}"
+    client.upload_file(
+        file_path,
+        os.environ["BUCKET_NAME"],
+        key,
+        ExtraArgs={
+            "ContentType": content_types.get(ext, "application/octet-stream"),
+            "CacheControl": "public, max-age=31536000",
+        },
+    )
+    return key
+
+
 def handler(job):
     """
     Handles a job using ComfyUI via websockets for status and image retrieval.
@@ -793,17 +831,19 @@ def handler(job):
                                 )
 
                                 print(f"worker-comfyui - Uploading {filename} to S3...")
-                                s3_url = rp_upload.upload_image(job_id, temp_file_path)
+                                s3_key = _upload_to_bucket(job_id, filename, temp_file_path)
                                 os.remove(temp_file_path)  # Clean up temp file
                                 print(
-                                    f"worker-comfyui - Uploaded {filename} to S3: {s3_url}"
+                                    f"worker-comfyui - Uploaded {filename} to S3 key: {s3_key}"
                                 )
-                                # Append dictionary with filename and URL
+                                # Append dictionary with filename and object key
+                                # (deterministic key so the caller can recover the file
+                                #  even after the job status has expired)
                                 output_data.append(
                                     {
                                         "filename": filename,
-                                        "type": "s3_url",
-                                        "data": s3_url,
+                                        "type": "s3_key",
+                                        "data": s3_key,
                                     }
                                 )
                             except Exception as e:
